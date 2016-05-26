@@ -1,3 +1,4 @@
+import six
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.core.files.storage import (
@@ -49,10 +50,21 @@ class FallbackStorage(Storage):
                 raise ImproperlyConfigured("The setting `FALLBACK_STORAGES` is "
                                            "either missing or empty")
         self.backend_classes = backends
+        self._backends = None
 
     def get_backends(self):
-        for backend_class in self.backend_classes:
-            backend = get_storage_class(backend_class)()
+        if self._backends is None:
+            self._backends = list(self.install_backends())
+        return self._backends
+
+    def install_backends(self):
+        for config in self.backend_classes:
+            if isinstance(config, six.string_types):
+                backend_class = config
+                kwargs = {}
+            else:
+                backend_class, kwargs = config
+            backend = get_storage_class(backend_class)(**kwargs)
             yield backend_class, backend
 
     def get_backend_methods(self, method_name):
@@ -82,7 +94,10 @@ class FallbackStorage(Storage):
 
         for backend_class, backend_method in self.get_backend_methods('exists'):
             try:
-                return_values.append(backend_method(*args, **kwargs))
+                res = backend_method(*args, **kwargs)
+                if res:
+                    return res
+                return_values.append(res)
             except Exception as e:
                 exceptions[backend_class] = e
                 continue
